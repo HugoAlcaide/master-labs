@@ -67,6 +67,7 @@ Se estableció la conexión directa entre el editor y la instancia en la nube pa
 3. Una vez establecida la sesión, se navegó por el árbol de objetos comprobando la presencia de las tablas maestras (`SalesLT.Customer`, `SalesLT.Product`) y de detalle (`SalesLT.SalesOrderDetail`, `SalesLT.SalesOrderHeader`), así como las vistas del sistema.
 
 ![Conexión MSSQL en VS Code](./img/lab04-03-vscode-mssql-connection.png)
+
 *Figura 3: Árbol de navegación de la base de datos AdventureWorksLT mostrando el catálogo de tablas del esquema SalesLT.*
 
 ---
