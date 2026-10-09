@@ -198,7 +198,7 @@ ORDER BY improvement_measure DESC;
 
 El resultado identificó de forma inequívoca la necesidad de crear un índice estructurado con igualdad en `[Status]`, desigualdad en `[OrderDate]` y columnas de cobertura en el `INCLUDE`.
 
-![Recomendaciones de Missing Indexes mediante DMVs](./img/cap06.jpg)
+![Recomendaciones de Missing Indexes mediante DMVs](./img/cap06.png)
 
 ---
 
