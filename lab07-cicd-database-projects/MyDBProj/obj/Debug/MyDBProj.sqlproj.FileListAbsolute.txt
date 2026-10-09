@@ -1,0 +1,1 @@
+C:\Users\halca\Documents\Master_BigData-IA\master-labs\lab07-cicd-database-projects\MyDBProj\bin\Debug\MyDBProj.dacpac

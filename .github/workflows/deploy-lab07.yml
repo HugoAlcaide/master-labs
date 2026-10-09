@@ -1,0 +1,33 @@
+name: Deploy Lab 07 - SQL Database Project
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'lab07-cicd-database-projects/**'
+      - '.github/workflows/deploy-lab07.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Database Project (Compile to DACPAC)
+        run: dotnet build lab07-cicd-database-projects/MyDBProj/MyDBProj.sqlproj -c Release
+
+      - name: Deploy DACPAC to Azure SQL Database
+        uses: azure/sql-action@v2
+        with:
+          connection-string: ${{ secrets.AZURE_CONN_STRING }}
+          path: 'lab07-cicd-database-projects/MyDBProj/bin/Release/**/MyDBProj.dacpac'
+          action: 'publish'
