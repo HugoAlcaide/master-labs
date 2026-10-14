@@ -1,0 +1,89 @@
+{
+  "$schema": "https://github.com/Azure/data-api-builder/releases/latest/download/dab.draft.schema.json",
+  "data-source": {
+    "database-type": "mssql",
+    "connection-string": "@env('DATABASE_CONNECTION_STRING')"
+  },
+  "runtime": {
+    "rest": {
+      "enabled": true,
+      "path": "/api"
+    },
+    "graphql": {
+      "enabled": true,
+      "path": "/graphql"
+    },
+    "host": {
+      "mode": "development"
+    }
+  },
+  "entities": {
+    "Category": {
+      "source": {
+        "object": "dbo.Categories",
+        "type": "table"
+      },
+      "relationships": {
+        "products": {
+          "cardinality": "many",
+          "target.entity": "Product",
+          "source.fields": ["CategoryID"],
+          "target.fields": ["CategoryID"]
+        }
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": ["read"]
+        }
+      ]
+    },
+    "Product": {
+      "source": {
+        "object": "dbo.Products",
+        "type": "table"
+      },
+      "mappings": {
+        "ProductID": "id",
+        "ProductName": "name",
+        "UnitPrice": "price",
+        "UnitsInStock": "stockQuantity",
+        "Discontinued": "isDiscontinued"
+      },
+      "relationships": {
+        "category": {
+          "cardinality": "one",
+          "target.entity": "Category",
+          "source.fields": ["CategoryID"],
+          "target.fields": ["CategoryID"]
+        }
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": ["read"]
+        },
+        {
+          "role": "authenticated",
+          "actions": ["*"]
+        }
+      ]
+    },
+    "ProductCatalog": {
+      "source": {
+        "object": "dbo.ProductCatalogView",
+        "type": "view",
+        "key-fields": ["ProductID"]
+      },
+      "graphql": {
+        "operation": "query"
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": ["read"]
+        }
+      ]
+    }
+  }
+}
