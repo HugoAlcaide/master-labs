@@ -7,21 +7,21 @@
 ---
 
 ### 1. Aprovisionamiento de Azure SQL Database e Identidad Administrada
-Creamos la base de datos `AdventureWorksLT` con los datos de ejemplo (`Sample`) en el nivel Hyperscale Serverless y activamos la identidad administrada asignada por el sistema (*System assigned managed identity*) en el servidor lógico de SQL para que pueda autenticarse contra Azure OpenAI sin usar claves API en el código.
+Creamos la base de datos `AdventureWorksLT` con los datos de ejemplo (`Sample`) en el servidor lógico `sqlserver-alcaide` y activamos su identidad administrada asignada por el sistema (*System assigned managed identity* en `On`) para autenticarnos contra Azure OpenAI sin almacenar claves en el código.
 
 ![Configuración de Azure SQL y Managed Identity](img/ejercicio01.png)
 
 ---
 
 ### 2. Despliegue de modelos en Microsoft Foundry y permisos IAM
-Creamos el proyecto en Microsoft Foundry, desplegamos el modelo de embeddings `text-embedding-3-small` junto con el modelo de chat y asignamos el rol **Cognitive Services OpenAI User** a la identidad administrada de nuestro servidor SQL sobre el recurso de Azure OpenAI.
+En nuestro recurso de Microsoft Foundry (`hugo-alcaide-4000-resource`) desplegamos el modelo de embeddings `text-embedding-3-small` junto con el modelo de chat `gpt-5-mini`, y desde **Access control (IAM)** asignamos el rol **Cognitive Services OpenAI User** a la identidad administrada de `sqlserver-alcaide`.
 
 ![Modelos desplegados y permisos IAM](img/ejercicio02.png)
 
 ---
 
 ### 3. Creación y carga de la tabla `dbo.ProductReview`
-Ejecutamos el script `product-reviews-insert.sql` sobre `AdventureWorksLT` para crear la tabla `dbo.ProductReview` y cargar las 140 reseñas de clientes de distintas categorías de productos.
+Ejecutamos el script `product-reviews-insert.sql` sobre `AdventureWorksLT` para crear la tabla `dbo.ProductReview` y comprobamos que se han insertado las 140 reseñas de productos.
 
 ```sql
 SELECT COUNT(*) AS TotalReviews FROM dbo.ProductReview;
@@ -33,24 +33,24 @@ GO
 ---
 
 ### 4. Creación de la credencial de base de datos y del modelo externo
-Creamos la `MASTER KEY`, la credencial de ámbito de base de datos usando `Managed Identity` contra el servicio de Cognitive Services y definimos el objeto `EXTERNAL MODEL` (`my_embedding_model`) apuntando al despliegue de `text-embedding-3-small`.
+Creamos la `MASTER KEY`, la credencial de base de datos apuntando a `https://hugo-alcaide-4000-resource.openai.azure.com` mediante `Managed Identity` y el modelo externo `my_embedding_model` vinculado al despliegue `text-embedding-3-small`.
 
 ```sql
 IF NOT EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = '##MS_DatabaseMasterKey##')
     CREATE MASTER KEY ENCRYPTION BY PASSWORD = 'StrongPassword123!@#';
 GO
 
-CREATE DATABASE SCOPED CREDENTIAL [https://<tu-endpoint-openai>.openai.azure.com]
+CREATE DATABASE SCOPED CREDENTIAL [[https://hugo-alcaide-4000-resource.openai.azure.com](https://hugo-alcaide-4000-resource.openai.azure.com)]
 WITH IDENTITY = 'Managed Identity', SECRET = '{"resourceid":"[https://cognitiveservices.azure.com](https://cognitiveservices.azure.com)"}';
 GO
 
 CREATE EXTERNAL MODEL my_embedding_model
 WITH (
-    LOCATION = 'https://<tu-endpoint-openai>[.openai.azure.com/openai/deployments/text-embedding-3-small/embeddings?api-version=2024-10-21](https://.openai.azure.com/openai/deployments/text-embedding-3-small/embeddings?api-version=2024-10-21)',
+    LOCATION = '[https://hugo-alcaide-4000-resource.openai.azure.com/openai/deployments/text-embedding-3-small/embeddings?api-version=2024-10-21](https://hugo-alcaide-4000-resource.openai.azure.com/openai/deployments/text-embedding-3-small/embeddings?api-version=2024-10-21)',
     API_FORMAT = 'Azure OpenAI',
     MODEL_TYPE = EMBEDDINGS,
     MODEL = 'text-embedding-3-small',
-    CREDENTIAL = [https://<tu-endpoint-openai>.openai.azure.com]
+    CREDENTIAL = [[https://hugo-alcaide-4000-resource.openai.azure.com](https://hugo-alcaide-4000-resource.openai.azure.com)]
 );
 GO
 ```
@@ -60,7 +60,7 @@ GO
 ---
 
 ### 5. Columna `VECTOR(1536)` y prueba de generación de embeddings
-Añadimos la columna `ReviewVector` con el tipo nativo `VECTOR(1536)` a la tabla de reseñas y probamos la función `AI_GENERATE_EMBEDDINGS` sobre una primera fila para verificar la comunicación con Azure OpenAI.
+Añadimos la columna `ReviewVector` de tipo `VECTOR(1536)` a `dbo.ProductReview` y probamos `AI_GENERATE_EMBEDDINGS` con la primera reseña (`Perfect commuter road bike`) para verificar que devuelve el vector correctamente.
 
 ```sql
 ALTER TABLE dbo.ProductReview
@@ -83,7 +83,7 @@ GO
 ---
 
 ### 6. Generación de embeddings por lotes e inspección con `VECTORPROPERTY`
-Generamos los vectores para las 140 reseñas en lotes de 30 filas combinando el nombre del producto, el título y el texto de la reseña. Al terminar, comprobamos con `VECTORPROPERTY` que todos los vectores tienen 1536 dimensiones en formato `float` (~6 KB por fila).
+Generamos los embeddings de las 140 reseñas en lotes de 30 filas combinando el nombre del producto, el título y el comentario. Después verificamos que las 140 filas tienen su vector completo y consultamos sus propiedades con `VECTORPROPERTY` (`1536` dimensiones, tipo base `float32` y `6152` bytes).
 
 ```sql
 DECLARE @batchSize INT = 30;
@@ -153,7 +153,7 @@ GO
 ---
 
 ### 7. Búsqueda semántica con `VECTOR_DISTANCE` frente a búsqueda por palabras (`LIKE`)
-Convertimos una pregunta en lenguaje natural en un vector y buscamos las 5 reseñas más cercanas mediante distancia del coseno (`VECTOR_DISTANCE`). Al compararlo con un `LIKE '%puncture%'`, comprobamos que la búsqueda vectorial localiza también reseñas que hablan de resistencia y durabilidad de neumáticos aunque no utilicen exactamente la palabra *puncture*.
+Buscamos las 5 reseñas más parecidas a la pregunta `'Which tires last the longest and resist punctures?'` usando `VECTOR_DISTANCE('cosine', ...)` y lo comparamos con una búsqueda por texto con `LIKE '%puncture%'`. La búsqueda vectorial encuentra reseñas relevantes sobre durabilidad de neumáticos (como `Durable long-distance touring tire` o `Reliable mountain tube`) aunque no contengan la palabra literal *puncture*.
 
 ```sql
 DECLARE @searchText NVARCHAR(1000) = 'Which tires last the longest and resist punctures?';
@@ -187,26 +187,34 @@ GO
 ---
 
 ### 8. Mantenimiento de embeddings ante cambios en el texto
-Comprobamos qué ocurre cuando se actualiza el texto de la reseña 124 (originalmente sobre guantes de invierno) para que hable de neumáticos sin regenerar su vector: la distancia frente a la búsqueda `'warm winter cycling gloves'` sigue siendo baja porque el vector ha quedado obsoleto (*stale*). Al recalcular `ReviewVector` con `AI_GENERATE_EMBEDDINGS`, la distancia aumenta reflejando el nuevo contenido.
+Comprobamos la distancia de la reseña 124 frente a la consulta `'warm winter cycling gloves'` (`0,3329`). Al cambiar su texto por una reseña de neumáticos sin actualizar el vector, la distancia sigue siendo idéntica (`0,3329`) porque el vector ha quedado desactualizado (*stale*). Una vez regenerado el vector con `AI_GENERATE_EMBEDDINGS`, la distancia sube a `0,6048`, reflejando que el nuevo texto ya no trata sobre guantes.
 
 ```sql
 DECLARE @searchVector VECTOR(1536);
 SELECT @searchVector = AI_GENERATE_EMBEDDINGS('warm winter cycling gloves' USE MODEL my_embedding_model);
 
--- 1. Distancia inicial (guantes)
-SELECT r.ReviewID, r.ReviewTitle, VECTOR_DISTANCE('cosine', @searchVector, r.ReviewVector) AS DistanceBefore
-FROM dbo.ProductReview r WHERE r.ReviewID = 124;
+-- 1. Distancia ANTES del cambio
+SELECT
+    r.ReviewID,
+    r.ReviewTitle,
+    VECTOR_DISTANCE('cosine', @searchVector, r.ReviewVector) AS DistanceBefore
+FROM dbo.ProductReview r
+WHERE r.ReviewID = 124;
 
--- 2. Cambio de texto sin actualizar el vector (embedding desactualizado)
+-- 2. Cambiamos el texto sin actualizar el vector
 UPDATE dbo.ProductReview
 SET ReviewText = 'These tires are the most puncture-resistant tires I have ever used. Over 3000 miles with zero flats on rough gravel roads.',
     ReviewTitle = N'Indestructible tires'
 WHERE ReviewID = 124;
 
-SELECT r.ReviewID, r.ReviewTitle, VECTOR_DISTANCE('cosine', @searchVector, r.ReviewVector) AS DistanceAfterTextChange
-FROM dbo.ProductReview r WHERE r.ReviewID = 124;
+SELECT
+    r.ReviewID,
+    r.ReviewTitle,
+    VECTOR_DISTANCE('cosine', @searchVector, r.ReviewVector) AS DistanceAfterTextChange_Stale
+FROM dbo.ProductReview r
+WHERE r.ReviewID = 124;
 
--- 3. Regeneración del vector y nueva distancia
+-- 3. Regeneramos el vector para el nuevo texto
 UPDATE r
 SET r.ReviewVector = AI_GENERATE_EMBEDDINGS(
     p.Name + ' - ' + r.ReviewTitle + ': ' + r.ReviewText
@@ -215,8 +223,12 @@ FROM dbo.ProductReview r
 INNER JOIN SalesLT.Product p ON r.ProductID = p.ProductID
 WHERE r.ReviewID = 124;
 
-SELECT r.ReviewID, r.ReviewTitle, VECTOR_DISTANCE('cosine', @searchVector, r.ReviewVector) AS DistanceAfterRegeneration
-FROM dbo.ProductReview r WHERE r.ReviewID = 124;
+SELECT
+    r.ReviewID,
+    r.ReviewTitle,
+    VECTOR_DISTANCE('cosine', @searchVector, r.ReviewVector) AS DistanceAfterRegeneration
+FROM dbo.ProductReview r
+WHERE r.ReviewID = 124;
 GO
 ```
 
@@ -225,7 +237,7 @@ GO
 ---
 
 ### 9. Restauración de los datos originales
-Restauramos el título, el texto y el embedding original de la reseña 124 para mantener la base de datos consistente de cara a los siguientes laboratorios.
+Restauramos el título y texto original de la reseña 124 (`Warm hands well below freezing`) y regeneramos su embedding para dejar la tabla lista para los siguientes laboratorios.
 
 ```sql
 UPDATE dbo.ProductReview
@@ -241,6 +253,11 @@ SET r.ReviewVector = AI_GENERATE_EMBEDDINGS(
 FROM dbo.ProductReview r
 INNER JOIN SalesLT.Product p ON r.ProductID = p.ProductID
 WHERE r.ReviewID = 124;
+GO
+
+SELECT ReviewID, ReviewTitle, LEFT(ReviewText, 80) AS ReviewTextPreview 
+FROM dbo.ProductReview 
+WHERE ReviewID = 124;
 GO
 ```
 
