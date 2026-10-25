@@ -2,8 +2,8 @@
 
 En este laboratorio se construye un flujo completo **RAG (Retrieval-Augmented Generation)** íntegramente desde T-SQL en **Azure SQL Database**:
 1. **Retrieval (Recuperación):** Conversión de la pregunta del usuario en un vector (`AI_GENERATE_EMBEDDINGS`) y búsqueda de las 5 reseñas más relevantes mediante `VECTOR_SEARCH` y el índice **DiskANN**, formateando la salida como contexto JSON (`FOR JSON PATH`).
-2. **Augmentation (Aumento):** Construcción dinámica del payload JSON con instrucciones de sistema (*grounding*) y el contexto recuperado mediante `JSON_OBJECT` y `JSON_ARRAY`.
-3. **Generation (Generación):** Invocación directa al endpoint REST de Azure OpenAI (`gpt-5.4-mini`) mediante `sp_invoke_external_rest_endpoint` y encapsulación en el procedimiento almacenado `dbo.AskProductQuestion`.
+2. **Augmentation (Aumento):** Construcción dinámica del payload JSON con instrucciones de sistema (*grounding*) y el contexto recuperado mediante `JSON_OBJECT` y `JSON_ARRAY`, adaptado a modelos con razonamiento (`max_completion_tokens`).
+3. **Generation (Generación):** Invocación directa al endpoint REST de Azure OpenAI (`gpt-5-mini`) mediante `sp_invoke_external_rest_endpoint` y encapsulación en el procedimiento almacenado `dbo.AskProductQuestion`.
 
 ---
 
@@ -25,7 +25,7 @@ GO
 
 ## Paso 2: Recuperación de Contexto en Formato JSON (Retrieval)
 
-Se vectoriza la pregunta del usuario y se recuperan las 5 reseñas semánticamente más cercanas utilizando `VECTOR_SEARCH` y `FOR JSON PATH`:
+Se vectoriza la pregunta del usuario y se recuperan las 5 reseñas semánticamente más cercanas utilizando `VECTOR_SEARCH` (sintaxis actualizada con `SELECT TOP (5)` y ordenación por distancia) y `FOR JSON PATH`:
 
 ```sql
 DECLARE @userQuestion NVARCHAR(1000) = 'What mountain bike can handle really technical rocky trails?';
@@ -33,7 +33,7 @@ DECLARE @questionVector VECTOR(1536);
 
 SELECT @questionVector = AI_GENERATE_EMBEDDINGS(@userQuestion USE MODEL my_embedding_model);
 
-SELECT
+SELECT TOP (5)
     p.Name AS ProductName,
     p.ListPrice,
     pc.Name AS Category,
@@ -45,13 +45,13 @@ FROM VECTOR_SEARCH(
     TABLE = dbo.ProductReview AS r,
     COLUMN = ReviewVector,
     SIMILAR_TO = @questionVector,
-    METRIC = 'cosine',
-    TOP_N = 5
+    METRIC = 'cosine'
 ) AS vs
 INNER JOIN SalesLT.Product p 
     ON r.ProductID = p.ProductID
 INNER JOIN SalesLT.ProductCategory pc 
     ON p.ProductCategoryID = pc.ProductCategoryID
+ORDER BY vs.distance ASC
 FOR JSON PATH;
 GO
 ```
@@ -62,7 +62,7 @@ GO
 
 ## Paso 3: Construcción del Prompt Aumentado (Augmentation)
 
-Se combina el contexto JSON recuperado de la base de datos con el prompt de sistema y la pregunta del usuario construyendo el payload mediante `JSON_OBJECT` y `JSON_ARRAY`:
+Se combina el contexto JSON recuperado de la base de datos con el prompt de sistema y la pregunta del usuario construyendo el payload mediante `JSON_OBJECT` y `JSON_ARRAY`, configurando `max_completion_tokens`:
 
 ```sql
 DECLARE @userQuestion NVARCHAR(1000) = 'What is the best bike for commuting to work in rainy weather?';
@@ -75,7 +75,7 @@ SELECT @questionVector = AI_GENERATE_EMBEDDINGS(@userQuestion USE MODEL my_embed
 
 -- Step 2: Retrieve relevant reviews using ANN vector search
 SET @context = (
-    SELECT
+    SELECT TOP (5)
         p.Name AS ProductName,
         p.ListPrice,
         pc.Name AS Category,
@@ -86,13 +86,13 @@ SET @context = (
         TABLE = dbo.ProductReview AS r,
         COLUMN = ReviewVector,
         SIMILAR_TO = @questionVector,
-        METRIC = 'cosine',
-        TOP_N = 5
+        METRIC = 'cosine'
     ) AS vs
     INNER JOIN SalesLT.Product p 
         ON r.ProductID = p.ProductID
     INNER JOIN SalesLT.ProductCategory pc 
         ON p.ProductCategoryID = pc.ProductCategoryID
+    ORDER BY vs.distance ASC
     FOR JSON PATH
 );
 
@@ -108,8 +108,7 @@ SET @payload = JSON_OBJECT(
             'content': 'Product reviews: ' + ISNULL(@context, '[]') + CHAR(10) + CHAR(10) + 'Customer question: ' + @userQuestion
         )
     ),
-    'max_tokens': CAST(500 AS INT),
-    'temperature': 0.5
+    'max_completion_tokens': CAST(1500 AS INT)
 );
 
 SELECT @payload AS AugmentedPrompt;
@@ -122,7 +121,7 @@ GO
 
 ## Paso 4: Invocación a Azure OpenAI y Generación de Respuesta (Generation)
 
-Se envía el payload al modelo `gpt-5.4-mini` mediante `sp_invoke_external_rest_endpoint` autenticando con la credencial `Managed Identity` y se extrae el contenido de `$.result.choices[0].message.content`:
+Se envía el payload al modelo desplegado (`gpt-5-mini`) mediante `sp_invoke_external_rest_endpoint` autenticando con la credencial `Managed Identity` y se extrae el contenido de `$.result.choices[0].message.content`:
 
 ```sql
 DECLARE @userQuestion NVARCHAR(1000) = 'Which tires last the longest and resist punctures?';
@@ -137,7 +136,7 @@ SELECT @questionVector = AI_GENERATE_EMBEDDINGS(@userQuestion USE MODEL my_embed
 
 -- Step 2: Retrieve relevant reviews using ANN vector search
 SET @context = (
-    SELECT
+    SELECT TOP (5)
         p.Name AS ProductName,
         p.ListPrice,
         pc.Name AS Category,
@@ -148,13 +147,13 @@ SET @context = (
         TABLE = dbo.ProductReview AS r,
         COLUMN = ReviewVector,
         SIMILAR_TO = @questionVector,
-        METRIC = 'cosine',
-        TOP_N = 5
+        METRIC = 'cosine'
     ) AS vs
     INNER JOIN SalesLT.Product p 
         ON r.ProductID = p.ProductID
     INNER JOIN SalesLT.ProductCategory pc 
         ON p.ProductCategoryID = pc.ProductCategoryID
+    ORDER BY vs.distance ASC
     FOR JSON PATH
 );
 
@@ -170,16 +169,15 @@ SET @payload = JSON_OBJECT(
             'content': 'Product reviews: ' + ISNULL(@context, '[]') + CHAR(10) + CHAR(10) + 'Customer question: ' + @userQuestion
         )
     ),
-    'max_tokens': CAST(500 AS INT),
-    'temperature': 0.5
+    'max_completion_tokens': CAST(1500 AS INT)
 );
 
 -- Step 4: Call Azure OpenAI
 EXECUTE @returnValue = sp_invoke_external_rest_endpoint
-    @url = N'https://<your-openai-endpoint>[.openai.azure.com/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2024-10-21](https://.openai.azure.com/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2024-10-21)',
+    @url = N'[https://proj-sqlailab-resource.openai.azure.com/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21](https://proj-sqlailab-resource.openai.azure.com/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21)',
     @method = 'POST',
     @payload = @payload,
-    @credential = [https://<your-openai-endpoint>.openai.azure.com],
+    @credential = [[https://proj-sqlailab-resource.openai.azure.com](https://proj-sqlailab-resource.openai.azure.com)],
     @response = @response OUTPUT;
 
 -- Step 5: Extract and display the answer
@@ -225,7 +223,7 @@ BEGIN
 
     -- Step 2: Retrieve relevant reviews using ANN vector search
     SET @context = (
-        SELECT
+        SELECT TOP (5)
             p.Name AS ProductName,
             p.ListPrice,
             pc.Name AS Category,
@@ -236,13 +234,13 @@ BEGIN
             TABLE = dbo.ProductReview AS r,
             COLUMN = ReviewVector,
             SIMILAR_TO = @questionVector,
-            METRIC = 'cosine',
-            TOP_N = 5
+            METRIC = 'cosine'
         ) AS vs
         INNER JOIN SalesLT.Product p 
             ON r.ProductID = p.ProductID
         INNER JOIN SalesLT.ProductCategory pc 
             ON p.ProductCategoryID = pc.ProductCategoryID
+        ORDER BY vs.distance ASC
         FOR JSON PATH
     );
 
@@ -270,16 +268,15 @@ BEGIN
                 'content': 'Product reviews: ' + @context + CHAR(10) + CHAR(10) + 'Customer question: ' + @Question
             )
         ),
-        'max_tokens': CAST(500 AS INT),
-        'temperature': 0.5
+        'max_completion_tokens': CAST(1500 AS INT)
     );
 
     -- Step 4: Call the model
     EXECUTE @returnValue = sp_invoke_external_rest_endpoint
-        @url = N'https://<your-openai-endpoint>[.openai.azure.com/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2024-10-21](https://.openai.azure.com/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2024-10-21)',
+        @url = N'[https://proj-sqlailab-resource.openai.azure.com/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21](https://proj-sqlailab-resource.openai.azure.com/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21)',
         @method = 'POST',
         @payload = @payload,
-        @credential = [https://<your-openai-endpoint>.openai.azure.com],
+        @credential = [[https://proj-sqlailab-resource.openai.azure.com](https://proj-sqlailab-resource.openai.azure.com)],
         @response = @response OUTPUT;
 
     -- Step 5: Extract the answer or handle errors
