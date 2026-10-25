@@ -35,22 +35,22 @@ Se configura la clave maestra, la credencial basada en `Managed Identity` y el o
 ```sql
 -- Create a database master key if one doesn't exist
 IF NOT EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = '##MS_DatabaseMasterKey##')
-    CREATE MASTER KEY ENCRYPTION BY PASSWORD = '<your strong password here>';
+    CREATE MASTER KEY ENCRYPTION BY PASSWORD = 'TuPasswordSeguro123!';
 GO
 
 -- Create a credential using Managed Identity
-CREATE DATABASE SCOPED CREDENTIAL [https://<your-openai-endpoint>.openai.azure.com]
-WITH IDENTITY = 'Managed Identity', SECRET = '{"resourceid":"[https://cognitiveservices.azure.com](https://cognitiveservices.azure.com)"}';
+CREATE DATABASE SCOPED CREDENTIAL [https://proj-sqlailab-resource.openai.azure.com]
+WITH IDENTITY = 'Managed Identity', SECRET = '{"resourceid":"https://cognitiveservices.azure.com"}';
 GO
 
 -- Create an external model reference for embeddings
 CREATE EXTERNAL MODEL my_embedding_model
 WITH (
-    LOCATION = 'https://<your-openai-endpoint>[.openai.azure.com/openai/deployments/text-embedding-3-small/embeddings?api-version=2024-10-21](https://.openai.azure.com/openai/deployments/text-embedding-3-small/embeddings?api-version=2024-10-21)',
+    LOCATION = 'https://proj-sqlailab-resource.openai.azure.com/openai/deployments/text-embedding-3-small/embeddings?api-version=2024-10-21',
     API_FORMAT = 'Azure OpenAI',
     MODEL_TYPE = EMBEDDINGS,
     MODEL = 'text-embedding-3-small',
-    CREDENTIAL = [https://<your-openai-endpoint>.openai.azure.com]
+    CREDENTIAL = [https://proj-sqlailab-resource.openai.azure.com]
 );
 GO
 ```
@@ -241,13 +241,13 @@ INNER JOIN SalesLT.Product p ON r.ProductID = p.ProductID
 ORDER BY Distance;
 GO
 
--- 2. Approximate Nearest Neighbor (ANN) with VECTOR_SEARCH
+-- 2. Approximate Nearest Neighbor (ANN) with VECTOR_SEARCH (Sintaxis actualizada)
 DECLARE @searchText NVARCHAR(1000) = 'something to keep me visible when riding at night';
 DECLARE @searchVector VECTOR(1536);
 
 SELECT @searchVector = AI_GENERATE_EMBEDDINGS(@searchText USE MODEL my_embedding_model);
 
-SELECT
+SELECT TOP (5)
     p.Name AS ProductName,
     r.ReviewTitle,
     r.ReviewText,
@@ -258,14 +258,13 @@ FROM VECTOR_SEARCH(
     TABLE = dbo.ProductReview AS r,
     COLUMN = ReviewVector,
     SIMILAR_TO = @searchVector,
-    METRIC = 'cosine',
-    TOP_N = 5
+    METRIC = 'cosine'
 ) AS vs
 INNER JOIN SalesLT.Product p 
     ON r.ProductID = p.ProductID
 INNER JOIN SalesLT.ProductCategory pc 
     ON p.ProductCategoryID = pc.ProductCategoryID
-ORDER BY vs.distance;
+ORDER BY vs.distance ASC;
 GO
 
 -- 3. Inspect vector metadata
@@ -304,7 +303,7 @@ WITH keyword_search AS (
 vector_search AS (
     SELECT TOP(@topN)
         ReviewID,
-        RANK() OVER (ORDER BY distance) AS vector_rank
+        RANK() OVER (ORDER BY distance ASC) AS vector_rank
     FROM (
         SELECT 
             r.ReviewID,
@@ -313,8 +312,7 @@ vector_search AS (
             TABLE = dbo.ProductReview AS r,
             COLUMN = ReviewVector,
             SIMILAR_TO = @searchVector,
-            METRIC = 'cosine',
-            TOP_N = 50
+            METRIC = 'cosine'
         ) AS vs
     ) AS similar_reviews
 ),
@@ -367,13 +365,13 @@ INNER JOIN FREETEXTTABLE(dbo.ProductReview, (ReviewTitle, ReviewText),
 ORDER BY ft.[RANK] DESC;
 GO
 
--- 2. Vector search only
+-- 2. Vector search only (Sintaxis actualizada)
 DECLARE @searchText NVARCHAR(1000) = 'comfortable bike for long weekend rides with the family';
 DECLARE @searchVector VECTOR(1536);
 
 SELECT @searchVector = AI_GENERATE_EMBEDDINGS(@searchText USE MODEL my_embedding_model);
 
-SELECT
+SELECT TOP (5)
     p.Name AS ProductName,
     r.ReviewTitle,
     r.ReviewText,
@@ -383,15 +381,14 @@ FROM VECTOR_SEARCH(
     TABLE = dbo.ProductReview AS r,
     COLUMN = ReviewVector,
     SIMILAR_TO = @searchVector,
-    METRIC = 'cosine',
-    TOP_N = 5
+    METRIC = 'cosine'
 ) AS vs
 INNER JOIN SalesLT.Product p 
     ON r.ProductID = p.ProductID
-ORDER BY vs.distance;
+ORDER BY vs.distance ASC;
 GO
 
--- 3. Hybrid search with RRF
+-- 3. Hybrid search with RRF (Sintaxis actualizada)
 DECLARE @searchText NVARCHAR(1000) = 'comfortable bike for long weekend rides with the family';
 DECLARE @searchVector VECTOR(1536);
 DECLARE @topN INT = 50;
@@ -410,7 +407,7 @@ WITH keyword_search AS (
 vector_search AS (
     SELECT TOP(@topN)
         ReviewID,
-        RANK() OVER (ORDER BY distance) AS vector_rank
+        RANK() OVER (ORDER BY distance ASC) AS vector_rank
     FROM (
         SELECT 
             r.ReviewID,
@@ -419,8 +416,7 @@ vector_search AS (
             TABLE = dbo.ProductReview AS r,
             COLUMN = ReviewVector,
             SIMILAR_TO = @searchVector,
-            METRIC = 'cosine',
-            TOP_N = 50
+            METRIC = 'cosine'
         ) AS vs
     ) AS similar_reviews
 ),
