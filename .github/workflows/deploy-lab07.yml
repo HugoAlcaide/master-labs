@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'lab07-cicd-database-projects/**'
+      - 'dp-800/lab07-cicd-database-projects/**'
       - '.github/workflows/deploy-lab07.yml'
   workflow_dispatch:
 
@@ -23,11 +23,11 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Build Database Project (Compile to DACPAC)
-        run: dotnet build lab07-cicd-database-projects/MyDBProj/MyDBProj.sqlproj -c Release
+        run: dotnet build dp-800/lab07-cicd-database-projects/MyDBProj/MyDBProj.sqlproj -c Release
 
       - name: Deploy DACPAC to Azure SQL Database
         uses: azure/sql-action@v2
         with:
           connection-string: ${{ secrets.AZURE_CONN_STRING }}
-          path: 'lab07-cicd-database-projects/MyDBProj/bin/Release/**/MyDBProj.dacpac'
+          path: 'dp-800/lab07-cicd-database-projects/MyDBProj/bin/Release/**/MyDBProj.dacpac'
           action: 'publish'
